@@ -1,5 +1,7 @@
 import cv2
 import os
+
+import numpy as np
 import pytesseract
 from pytesseract import Output
 
@@ -11,51 +13,21 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tessera
 
 
 class ImageTextExtractor:
+    """Использую три метода выделения контура
+           1 - с помощью pytesseract
+           2 - opencv, выделяю все контуру которые есть на картинке
+           3 - opencv, рисую прямоугольнику при обнаружении контура
+
+           """
+
     # функция обработки изображения и изъятия мз него текста
     @staticmethod
-    def process(filename):
+    def process_opencv(filename):
         img = cv2.imread(filename)
-
-        # конвертируем цветовую палитру нашего изображения для дальнейшей обработки
-        hsv_img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-
-        """Сегментация с помощью маски
-        Суть заключается в том, что мы берем определенный диапазон пикселей и "отсекаем" из изображения"""
-        pix_from = (0, 0, 0)
-        pix_to = (170, 170, 170)
-        # фильтруем изображение
-        mask = cv2.inRange(hsv_img, pix_from, pix_to)
-        result = cv2.bitwise_and(img, img, mask=mask)
-        # переводим изображение в серую палитру
-        gray_image = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
-        """Использую три метода выделения контура
-        1 - с помощью pytesseract
-        2 - opencv, выделяю все контуру которые есть на картинке
-        3 - opencv, рисую прямоугольнику при обнаружении контура
-        """
-        # создаем 3 копии для вывода результата обнаружения контура
-        output = result.copy()
-        output1 = result.copy()
-        output2 = result.copy()
-
-        # решение с тессерактом
-        # configuring parameters for tesseract
-        # oem - ocr engine mode psm - page segmentation mode
-        custom_config = r'--oem 1 --psm 6'
-        # now feeding image to tesseract
-        details = pytesseract.image_to_data(result, output_type=Output.DICT, config=custom_config, lang='eng')
-        total_boxes = len(details['text'])
-        for sequence_number in range(total_boxes):
-            if float(details['conf'][sequence_number]) > 30:
-                (x, y, w, h) = (details['left'][sequence_number], details['top'][sequence_number],
-                                details['width'][sequence_number],
-                                details['height'][sequence_number])
-
-                output = cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
+        gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         # решение opencv(2)
         contours, hierarchy = cv2.findContours(gray_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-        img1 = cv2.drawContours(output1, contours, -1, (0, 255, 75), 2)
+        img1 = cv2.drawContours(gray_image, contours, -1, (0, 255, 75), 2)
 
         # решение opencv(3)
         for idx, contour in enumerate(contours):
@@ -66,12 +38,51 @@ class ImageTextExtractor:
             # hierarchy[i][2]: the index of the first child
             # hierarchy[i][3]: the index of the parent
             if hierarchy[0][idx][3] == 0:
-                cv2.rectangle(output2, (x, y), (x + w, y + h), (255, 0, 0), 1)
+                cv2.rectangle(gray_image, (x, y), (x + w, y + h), (255, 0, 0), 1)
 
-        # расскоментировать, чтобы увидеть результат
+    @staticmethod
+    def process_tesseract(filename):
+        img = cv2.imread(filename)
+        # gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # ret, thresh = cv2.threshold(gray_image, 240, 255, cv2.THRESH_BINARY_INV)
+
+        # конвертируем цветовую палитру нашего изображения для дальнейшей обработки
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+
+        """Сегментация с помощью маски
+        Суть заключается в том, что мы берем определенный диапазон пикселей и "отсекаем" из изображения"""
+        pix_from = (0, 0, 0)
+        pix_to = (165, 165, 165)
+        # фильтруем изображение
+        mask = cv2.inRange(hsv_img, pix_from, pix_to)
+        result = cv2.bitwise_and(img, img, mask=mask)
+
+        height, width, _ = result.shape
+        # рисуем прямоугольник не задевая нужный нам текст
+        output = cv2.rectangle(result, (int(width / 5), int(height / 6)), (int(width * 5 / 6), int(height * 7 / 8)),
+                               (0, 0, 0), -1)
+
+        # configuring parameters for tesseract
+        # oem - ocr engine mode psm - page segmentation mode
+        # в tessedit_char_whitelist помещаем символы которые нам нужны
+        custom_config = '--psm 11 --user-patterns eng.user-patterns ' \
+                        '-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:.'
+
+        # now feeding image to tesseract
+        details = pytesseract.image_to_data(output, output_type=Output.DICT, config=custom_config)
+
+        """помещает текст в квадрат"""
+        total_boxes = len(details['text'])
+        for sequence_number in range(total_boxes):
+            if float(details['conf'][sequence_number]) < 30:
+                (x, y, w, h) = (details['left'][sequence_number], details['top'][sequence_number],
+                                details['width'][sequence_number],
+                                details['height'][sequence_number])
+
+                output = cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        # расскоментировать, чтобы увидеть результат обработки изображения
         # cv2.imshow("output", output)
-        # cv2.imshow("output1", output1)
-        # cv2.imshow("output2", output2)
         # cv2.waitKey(0)
 
         return list(filter(lambda x: x != "", details['text']))
@@ -88,4 +99,4 @@ if __name__ == '__main__':
     for folder in folders:
         images = os.listdir(image_numbers.format(folder=folder))
         for image in images:
-            print(a.process(im_path.format(folder=folder, im_name=image)))
+            print(a.process_tesseract(im_path.format(folder=folder, im_name=image)))
